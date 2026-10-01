@@ -1,0 +1,175 @@
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+
+# Configure page layout and browser title
+st.set_page_config(
+    page_title="BBA Last-Mile Delivery Simulator",
+    page_icon="🚚",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Application Header
+st.title("🚚 BBA Simulation: Last-Mile Delivery Network Optimization")
+st.markdown("""
+*Simulate how logistical decisions—such as pricing, fleet sizing, and staffing levels—impact operational bottlenecks, customer churn, and operating margins.*
+""")
+
+# ==========================================
+# 1. FACULTY INPUT CONTROLS (SIDEBAR)
+# ==========================================
+st.sidebar.header("⚙️ Simulation Controls")
+
+st.sidebar.subheader("1. Resource Capacity")
+fleet_size = st.sidebar.slider("Fleet Size (Vehicles)", min_value=10, max_value=100, value=50, step=5)
+staff_count = st.sidebar.slider("Processing Staff Count", min_value=10, max_value=60, value=20, step=2)
+
+st.sidebar.subheader("2. Pricing Strategy")
+base_fee = st.sidebar.slider("Delivery Service Fee ($)", min_value=4.0, max_value=25.0, value=8.0, step=0.5)
+express_surcharge = st.sidebar.slider("Express Surcharge ($)", min_value=0.0, max_value=20.0, value=5.0, step=0.5)
+
+st.sidebar.subheader("3. Market Demand")
+daily_demand = st.sidebar.slider("Daily Order Volume", min_value=500, max_value=5000, value=2500, step=100)
+
+# Quick Preset Buttons
+st.sidebar.markdown("---")
+st.sidebar.subheader("⚡ Quick Scenarios")
+if st.sidebar.button("📦 Normal Operations"):
+    st.rerun()
+
+# ==========================================
+# 2. SIMULATION ENGINE / MATHEMATICS
+# ==========================================
+# Daily Capacity Limits
+processing_cap = staff_count * 120  # 120 orders per staff/day
+fleet_cap = fleet_size * 40         # 40 orders per vehicle/day
+effective_capacity = min(processing_cap, fleet_cap)
+
+# Daily Financial Rates
+daily_revenue = daily_demand * (base_fee + (0.3 * express_surcharge))
+daily_labor_cost = staff_count * 150
+daily_fleet_cost = fleet_size * 220
+
+# 30-Day Iterative Simulation
+data = []
+cum_backlog = 0
+clv = 350.0  # Customer Lifetime Value ($)
+
+for day in range(1, 31):
+    cum_backlog = max(0, cum_backlog + daily_demand - effective_capacity)
+    day_refunds = cum_backlog * 15.0  # $15 penalty per delayed order
+    day_cost = daily_labor_cost + daily_fleet_cost + day_refunds
+    day_profit = daily_revenue - day_cost
+    
+    # Calculate Customer Churn Risk
+    delay_days = cum_backlog / effective_capacity if effective_capacity > 0 else 5.0
+    churn_rate = min(0.45, delay_days * 0.12)
+    day_rar = daily_demand * churn_rate * clv
+    
+    data.append({
+        "Day": day,
+        "Gross Revenue": daily_revenue,
+        "Total Costs": day_cost,
+        "Net Profit": day_profit,
+        "Cumulative Backlog": cum_backlog,
+        "Revenue at Risk": day_rar
+    })
+
+df = pd.DataFrame(data)
+
+# Aggregate Metrics
+total_revenue_30d = df["Gross Revenue"].sum()
+total_profit_30d = df["Net Profit"].sum()
+operating_margin = (total_profit_30d / total_revenue_30d * 100) if total_revenue_30d > 0 else 0
+ending_backlog = df["Cumulative Backlog"].iloc[-1]
+ending_rar = df["Revenue at Risk"].iloc[-1]
+
+# ==========================================
+# 3. KPI DASHBOARD HEADER
+# ==========================================
+kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+
+with kpi1:
+    st.metric(
+        label="Operating Margin (%)",
+        value=f"{operating_margin:.1f}%",
+        delta="Target > 15%" if operating_margin > 15 else "Low Margin",
+        delta_color="normal" if operating_margin > 15 else "inverse"
+    )
+
+with kpi2:
+    st.metric(
+        label="Ending Backlog Queue",
+        value=f"{ending_backlog:,.0f} orders",
+        delta="Clear" if ending_backlog == 0 else "Bottleneck Active",
+        delta_color="normal" if ending_backlog == 0 else "inverse"
+    )
+
+with kpi3:
+    st.metric(
+        label="CLV Revenue at Risk",
+        value=f"${ending_rar:,.0f}",
+        delta="Potential Churn",
+        delta_color="inverse" if ending_rar > 0 else "normal"
+    )
+
+with kpi4:
+    st.metric(
+        label="30-Day Net Profit",
+        value=f"${total_profit_30d:,.0f}",
+        delta="Profitable" if total_profit_30d > 0 else "Operating Loss",
+        delta_color="normal" if total_profit_30d > 0 else "inverse"
+    )
+
+st.markdown("---")
+
+# ==========================================
+# 4. DASHBOARD VISUALIZATIONS
+# ==========================================
+col_left, col_right = st.columns(2)
+
+# Chart 1: Financial Performance Trajectory
+with col_left:
+    st.subheader("📈 30-Day Revenue vs. Expenses Trajectory")
+    fig_finance = go.Figure()
+    fig_finance.add_trace(go.Scatter(x=df['Day'], y=df['Gross Revenue'], mode='lines', name='Gross Revenue', line=dict(color='#2ca02c', width=3)))
+    fig_finance.add_trace(go.Scatter(x=df['Day'], y=df['Total Costs'], mode='lines', name='Total Costs', line=dict(color='#d62728', width=3)))
+    fig_finance.add_trace(go.Scatter(x=df['Day'], y=df['Net Profit'], mode='lines', name='Net Profit', line=dict(color='#1f77b4', width=2, dash='dash')))
+    
+    fig_finance.update_layout(
+        xaxis_title="Simulation Day",
+        yaxis_title="Amount ($)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=10, r=10, t=30, b=10),
+        height=380
+    )
+    st.plotly_chart(fig_finance, use_container_width=True)
+
+# Chart 2: Queue Bottlenecks & Revenue At Risk
+with col_right:
+    st.subheader("⚠️ Backlog Queue & Churn Risk")
+    fig_risk = go.Figure()
+    fig_risk.add_trace(go.Bar(x=df['Day'], y=df['Cumulative Backlog'], name='Backlog (Orders)', marker_color='#ff7f0e'))
+    fig_risk.add_trace(go.Scatter(x=df['Day'], y=df['Revenue at Risk'], name='Revenue at Risk ($)', yaxis='y2', line=dict(color='#9467bd', width=3)))
+    
+    fig_risk.update_layout(
+        xaxis_title="Simulation Day",
+        yaxis=dict(title="Backlog Queue (Orders)"),
+        yaxis2=dict(title="Revenue at Risk ($)", overlaying='y', side='right'),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=10, r=10, t=30, b=10),
+        height=380
+    )
+    st.plotly_chart(fig_risk, use_container_width=True)
+
+# ==========================================
+# 5. FACULTY PEDAGOGY GUIDE
+# ==========================================
+with st.expander("🎓 Faculty Teaching Guide & Discussion Points"):
+    st.markdown("""
+    ### Key Classroom Discussion Points
+    * **Capacity Constraints:** Increase staff to 50 while keeping fleet size at 20. Notice how extra staff yields zero added throughput because the fleet is the limiting bottleneck.
+    * **Compounding Costs of Delays:** When unfulfilled backlogs persist, operating costs rise steadily over time due to accumulating per-order refund penalties ($15/order).
+    * **Impact on Customer Retention:** Demonstrates how operational backlogs result in non-linear losses in long-term Customer Lifetime Value (CLV).
+    """)
